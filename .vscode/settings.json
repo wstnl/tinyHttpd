@@ -1,5 +1,9 @@
 {
     "files.associations": {
-        "functional": "c"
+        "functional": "c",
+        "istream": "c",
+        "ostream": "c",
+        "utility": "c",
+        "in.h": "c"
     }
 }
