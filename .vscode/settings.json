@@ -4,6 +4,7 @@
         "istream": "c",
         "ostream": "c",
         "utility": "c",
-        "in.h": "c"
+        "in.h": "c",
+        "ctype.h": "c"
     }
 }

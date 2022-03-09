@@ -12,23 +12,31 @@
   *  4) Uncomment the line that runs accept_request().
   *  5) Remove -lsocket from the Makefile.
   */
+ 
+ /*******************************************************\
+  * A frame by by J. David Blackstone.
+  * Edited and adding alias by @youzi.
+  * https://github.com/wstnl/tinyHttpd
+  * 
+ \*******************************************************/
+
 #include <stdio.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <netinet/in.h> // define IPv4/IPv6 address
 #include <arpa/inet.h> // convert a string(char*) to in_addr(32bit unsigned int)
 #include <unistd.h>
-#include <ctype.h>
+#include <ctype.h> // to use function: isspace((int)(x))
 #include <strings.h>
 #include <string.h>
-#include <sys/stat.h>
+#include <sys/stat.h> // to check file mode
   // #include <pthread.h>
 #include <sys/wait.h>
 #include <stdlib.h>
 
 #define ISspace(x) isspace((int)(x))
 
-#define SERVER_STRING "Server: jdbhttpd/0.1.0\r\n"
+#define SERVER_STRING "Server: youzi_httpd/0.1.0\r\n"
 
 void accept_request(int);
 void bad_request(int);
@@ -71,7 +79,7 @@ void accept_request(int client)
   method[i] = '\0';
 
   if (strcasecmp(method, "GET") && strcasecmp(method, "POST")) 
-  { // neither "GET" nor "POST"
+  { // neither "GET" nor "POST", send 501.
     unimplemented(client);
     return;
   }
@@ -87,7 +95,7 @@ void accept_request(int client)
     url[i] = buf[j];
     i++; j++;
   }
-  url[i] = '\0';
+  url[i] = '\0'; // url, get!
 
   if (strcasecmp(method, "GET") == 0)
   {
@@ -105,7 +113,7 @@ void accept_request(int client)
   sprintf(path, "htdocs%s", url);
   if (path[strlen(path) - 1] == '/')
     strcat(path, "index.html");
-  if (stat(path, &st) == -1) {
+  if (stat(path, &st) == -1) { // cannot find file at "path"
     while ((numchars > 0) && strcmp("\n", buf))  /* read & discard headers */
       numchars = get_line(client, buf, sizeof(buf));
     not_found(client);
@@ -114,7 +122,7 @@ void accept_request(int client)
   {
     if ((st.st_mode & S_IFMT) == S_IFDIR)
       strcat(path, "/index.html");
-    if ((st.st_mode & S_IXUSR) ||
+    if ((st.st_mode & S_IXUSR) || // check exec permission and open cgi
       (st.st_mode & S_IXGRP) ||
       (st.st_mode & S_IXOTH))
       cgi = 1;
@@ -205,8 +213,8 @@ void execute_cgi(int client, const char* path,
   const char* method, const char* query_string)
 {
   char buf[1024];
-  int cgi_output[2];
-  int cgi_input[2];
+  int cgi_output[2]; // pipe1
+  int cgi_input[2]; // pipe2
   pid_t pid;
   int status;
   int i;
@@ -222,14 +230,14 @@ void execute_cgi(int client, const char* path,
   {
     numchars = get_line(client, buf, sizeof(buf));
     while ((numchars > 0) && strcmp("\n", buf))
-    {
+    { // read post message and find if it includes "Content-Length:"
       buf[15] = '\0';
       if (strcasecmp(buf, "Content-Length:") == 0)
         content_length = atoi(&(buf[16]));
       numchars = get_line(client, buf, sizeof(buf));
     }
     if (content_length == -1) {
-      bad_request(client);
+      bad_request(client); // never see a line started with "Content-Length:"
       return;
     }
   }
@@ -246,7 +254,7 @@ void execute_cgi(int client, const char* path,
     return;
   }
 
-  if ((pid = fork()) < 0) {
+  if ((pid = fork()) < 0) { // fork
     cannot_execute(client);
     return;
   }
@@ -256,8 +264,8 @@ void execute_cgi(int client, const char* path,
     char query_env[255];
     char length_env[255];
 
-    dup2(cgi_output[1], 1);
-    dup2(cgi_input[0], 0);
+    dup2(cgi_output[1], STDOUT_FILENO); //redirect output from "cgi_output" to standard output
+    dup2(cgi_input[0], STDIN_FILENO);
     close(cgi_output[0]);
     close(cgi_input[1]);
     sprintf(meth_env, "REQUEST_METHOD=%s", method);
@@ -271,14 +279,14 @@ void execute_cgi(int client, const char* path,
       putenv(length_env);
     }
     execl(path, path, NULL);
-    exit(0);
+    error_die("execl"); // if execl() function returns, there must be something wrong.
   }
   else {    /* parent */
     close(cgi_output[1]);
     close(cgi_input[0]);
     if (strcasecmp(method, "POST") == 0)
       for (i = 0; i < content_length; i++) {
-        recv(client, &c, 1, 0);
+        recv(client, &c, 1, 0); // read post content one by one
         write(cgi_input[1], &c, 1);
       }
     while (read(cgi_output[0], &c, 1) > 0)
@@ -317,7 +325,9 @@ int get_line(int sock, char* buf, int size)
     {
       if (c == '\r')
       {
-        n = recv(sock, &c, 1, MSG_PEEK);
+        n = recv(sock, &c, 1, MSG_PEEK); 
+        //Peeks at an incoming message. 
+        //The data is treated as unread and the next recv() or similar function shall still return this data.
         /* DEBUG printf("%02X\n", c); */
         if ((n > 0) && (c == '\n'))
           recv(sock, &c, 1, 0);
@@ -372,7 +382,7 @@ void not_found(int client)
   send(client, buf, strlen(buf), 0);
   sprintf(buf, "<HTML><TITLE>Not Found</TITLE>\r\n");
   send(client, buf, strlen(buf), 0);
-  sprintf(buf, "<BODY><P>The server could not fulfill\r\n");
+  sprintf(buf, "<BODY><H1>404: The server could not fulfill\r\n");
   send(client, buf, strlen(buf), 0);
   sprintf(buf, "your request because the resource specified\r\n");
   send(client, buf, strlen(buf), 0);
@@ -400,12 +410,12 @@ void serve_file(int client, const char* filename)
     numchars = get_line(client, buf, sizeof(buf));
 
   resource = fopen(filename, "r");
-  if (resource == NULL) // resource not found (404)
-    not_found(client);
+  if (resource == NULL) 
+    not_found(client); // resource not found (404)
   else
   {
-    headers(client, filename);
-    cat(client, resource);
+    headers(client, filename); // send header
+    cat(client, resource); // send body, i.e. file
   }
   fclose(resource);
 }
@@ -467,7 +477,7 @@ void unimplemented(int client)
   send(client, buf, strlen(buf), 0);
   sprintf(buf, "</TITLE></HEAD>\r\n");
   send(client, buf, strlen(buf), 0);
-  sprintf(buf, "<BODY><P>HTTP request method not supported.\r\n");
+  sprintf(buf, "<BODY><H1>501: HTTP request method not supported.\r\n");
   send(client, buf, strlen(buf), 0);
   sprintf(buf, "</BODY></HTML>\r\n");
   send(client, buf, strlen(buf), 0);
@@ -493,9 +503,10 @@ int main(void)
       (struct sockaddr*)&client_name,
       &client_name_len);
     if (client_sock == -1)
-      error_die("accept");
-    printf("%s is connecting\n", inet_ntoa(client_name.sin_addr)); // from u32 to char*
+      error_die("cannot accept");
+
     accept_request(client_sock);
+    printf("%s is connecting\n", inet_ntoa(client_name.sin_addr)); // from u32 to char*
     //  if (pthread_create(&newthread , NULL, accept_request, client_sock) != 0)
     //    perror("pthread_create");
   }
