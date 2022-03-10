@@ -12,13 +12,13 @@
   *  4) Uncomment the line that runs accept_request().
   *  5) Remove -lsocket from the Makefile.
   */
- 
- /*******************************************************\
-  * A frame by by J. David Blackstone.
-  * Edited and adding alias by @youzi.
-  * https://github.com/wstnl/tinyHttpd
-  * 
- \*******************************************************/
+
+  /*******************************************************\
+   * A frame by by J. David Blackstone.
+   * Edited and adding alias by @youzi.
+   * https://github.com/wstnl/tinyHttpd
+   *
+  \*******************************************************/
 
 #include <stdio.h>
 #include <sys/socket.h>
@@ -33,6 +33,8 @@
   // #include <pthread.h>
 #include <sys/wait.h>
 #include <stdlib.h>
+#include <sys/time.h> //FD_SET, FD_ISSET, FD_ZERO macros 
+
 
 #define ISspace(x) isspace((int)(x))
 
@@ -78,7 +80,7 @@ void accept_request(int client)
   }
   method[i] = '\0';
 
-  if (strcasecmp(method, "GET") && strcasecmp(method, "POST")) 
+  if (strcasecmp(method, "GET") && strcasecmp(method, "POST"))
   { // neither "GET" nor "POST", send 501.
     unimplemented(client);
     return;
@@ -325,7 +327,7 @@ int get_line(int sock, char* buf, int size)
     {
       if (c == '\r')
       {
-        n = recv(sock, &c, 1, MSG_PEEK); 
+        n = recv(sock, &c, 1, MSG_PEEK);
         //Peeks at an incoming message. 
         //The data is treated as unread and the next recv() or similar function shall still return this data.
         /* DEBUG printf("%02X\n", c); */
@@ -410,7 +412,7 @@ void serve_file(int client, const char* filename)
     numchars = get_line(client, buf, sizeof(buf));
 
   resource = fopen(filename, "r");
-  if (resource == NULL) 
+  if (resource == NULL)
     not_found(client); // resource not found (404)
   else
   {
@@ -431,11 +433,21 @@ void serve_file(int client, const char* filename)
 int startup(u_short* port)
 {
   int httpd = 0; // socket FD
+  int opt = 1;
   struct sockaddr_in name; // defined in <netinet/in>
 
   httpd = socket(PF_INET, SOCK_STREAM, 0);
   if (httpd == -1)
     error_die("socket");
+
+  //set master socket to allow multiple connections , this is just a good habit, it will work without this 
+  if (setsockopt(httpd, SOL_SOCKET, SO_REUSEADDR, (char*)&opt,
+    sizeof(opt)) < 0)
+  {
+    error_die("setsockopt");
+  }
+
+
   memset(&name, 0, sizeof(name));
   name.sin_family = AF_INET; // IPv4
   name.sin_port = htons(*port); // htons() converts the unsigned integer hostlong from host byte order to network byte order.
@@ -487,19 +499,136 @@ void unimplemented(int client)
 
 int main(void)
 {
-  int server_sock = -1; // listen socket FD
+  int server_master = -1; // listen socket FD
   u_short port = 23333; // set port number, if == 0, dynamically allocating a port.
-  int client_sock = -1; // connection socket FD
+  // int client_sock = -1; // connection socket FD
   struct sockaddr_in client_name;
   int client_name_len = sizeof(client_name);
   //  pthread_t newthread;
 
-  server_sock = startup(&port);
-  printf("httpd running on port %d\n", port);
+  int new_socket, activity, valread, sd;
+  //set of socket descriptors 
+  fd_set readfds;
+  int max_sd;
+  const int max_clients = 20;
+  int client_socket[max_clients];
+  char buffer[1025];  //data buffer of 1K // ready to del
+
+  //initialise all client_socket[] to 0 so not checked 
+  for (int i = 0; i < max_clients; i++)
+  {
+    client_socket[i] = 0;
+  }
+  
+  server_master = startup(&port);
+  printf("httpd running on port %d, waiting for connections...\n", port);
+
 
   while (1)
   {
-    client_sock = accept(server_sock,
+    //clear the socket set 
+    FD_ZERO(&readfds);
+
+    //add master socket to set 
+    FD_SET(server_master, &readfds);
+    max_sd = server_master;
+    //add child sockets to set 
+    for (int i = 0; i < max_clients; i++)
+    {
+      //socket descriptor 
+      sd = client_socket[i];
+
+      //if valid socket descriptor then add to read list 
+      if (sd > 0)
+        FD_SET(sd, &readfds);
+
+      //highest file descriptor number, need it for the select function 
+      if (sd > max_sd)
+        max_sd = sd;
+    }
+    //wait for an activity on one of the sockets , timeout is NULL , 
+    //so wait indefinitely 
+    activity = select(max_sd + 1, &readfds, NULL, NULL, NULL);
+
+    if (activity < 0)
+    {
+      error_die("select error");
+    }
+
+    //If something happened on the master socket , 
+    //then its an incoming connection 
+    if (FD_ISSET(server_master, &readfds))
+    {
+      if ((new_socket = accept(server_master,
+        (struct sockaddr*)&client_name, (socklen_t*)&client_name_len)) < 0)
+      {
+        perror("accept");
+        exit(EXIT_FAILURE);
+      }
+
+      //inform user of socket number - used in send and receive commands 
+      printf("New connection , socket fd is %d , ip is : %s , port : %d \n",
+        new_socket, inet_ntoa(client_name.sin_addr), ntohs(client_name.sin_port));
+
+      //send new connection greeting message 
+      // if (send(new_socket, message, strlen(message), 0) != strlen(message))
+      // {
+      //   perror("send");
+      // }
+      if (new_socket == -1)
+        error_die("cannot accept");
+
+      accept_request(new_socket);
+
+      //add new socket to array of sockets 
+      for (int i = 0; i < max_clients; i++)
+      {
+        //if position is empty 
+        if (client_socket[i] == 0)
+        {
+          client_socket[i] = new_socket;
+          printf("Adding to list of sockets as %d\n", i);
+
+          break;
+        }
+      }
+    }
+
+    //else its some IO operation on some other socket
+    for (int i = 0; i < max_clients; i++)
+    {
+      sd = client_socket[i];
+
+      if (FD_ISSET(sd, &readfds))
+      {
+        //Check if it was for closing , and also read the 
+        //incoming message 
+        if ((valread = read(sd, buffer, 1024)) == 0)
+        {
+          //Somebody disconnected , get his details and print 
+          getpeername(sd, (struct sockaddr*)&client_name, \
+            (socklen_t*)&client_name_len);
+          printf("Host disconnected , ip %s , port %d \n",
+            inet_ntoa(client_name.sin_addr), ntohs(client_name.sin_port));
+
+          //Close the socket and mark as 0 in list for reuse 
+          close(sd);
+          client_socket[i] = 0;
+        }
+
+        //Echo back the message that came in 
+        else
+        {
+          //set the string terminating NULL byte on the end 
+          //of the data read 
+          buffer[valread] = '\0';
+          send(sd, buffer, strlen(buffer), 0);
+        }
+      }
+    }
+
+    /*** OLD CODES
+    client_sock = accept(server_master,
       (struct sockaddr*)&client_name,
       &client_name_len);
     if (client_sock == -1)
@@ -507,11 +636,12 @@ int main(void)
 
     accept_request(client_sock);
     printf("%s is connecting\n", inet_ntoa(client_name.sin_addr)); // from u32 to char*
+    ***/
     //  if (pthread_create(&newthread , NULL, accept_request, client_sock) != 0)
     //    perror("pthread_create");
   }
 
-  close(server_sock);
+  close(server_master);
 
   return(0);
 }
