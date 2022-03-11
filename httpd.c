@@ -508,18 +508,16 @@ int main(void)
 {
   int server_sock = -1; // listen socket FD
   u_short port = 23333; // set port number, if == 0, dynamically allocating a port.
-  int client_sock = -1; // connection socket FD
+  // int client_sock = -1; // connection socket FD
   struct sockaddr_in client_name;
-  int client_name_len = sizeof(client_name);
+  // int client_name_len = sizeof(client_name);
   //  pthread_t newthread;
 
   struct pollfd	fds[200];
-  int	nfds = 1, current_size = 0, i, j;
-  int timeout;
-  int close_conn;
-  int	len, rc, on = 1;
+  int	nfds = 1, current_size = 0, i, j, rc;
+  int timeout= (3 * 60 * 1000);
   int	new_sd = -1;
-  int	desc_ready, end_server = FALSE, compress_array = FALSE;
+  int	end_server = FALSE, compress_array = FALSE;
 
 
 
@@ -533,8 +531,6 @@ int main(void)
   /*************************************************************/
   fds[0].fd = server_sock;
   fds[0].events = POLLIN;
-
-  timeout = (3 * 60 * 1000);
 
   do
   {
@@ -590,45 +586,10 @@ int main(void)
       else
       {
         printf("  Descriptor %d is readable\n", fds[i].fd);
-        close_conn = FALSE;
+        // close_conn = FALSE;
         accept_request(fds[i].fd);
-        // do
-        // {
-        //   if (recv(fds[i].fd, buffer, sizeof(buffer), 0) < 0)
-        //   {
-        //     if (errno != EWOULDBLOCK)
-        //     {
-        //       perror("  recv() failed");
-        //       close_conn = TRUE;
-        //     }
-        //     break;
-        //   }
+        printf("%s is connecting\n", inet_ntoa(client_name.sin_addr)); // from u32 to char*
 
-        //   if (rc == 0)
-        //   {
-        //     printf("  Connection closed\n");
-        //     close_conn = TRUE;
-        //     break;
-        //   }
-
-        //   len = rc;
-        //   printf("  %d bytes received\n", len);
-
-        //   rc = send(fds[i].fd, buffer, len, 0);
-        //   if (rc < 0)
-        //   {
-        //     perror("  send() failed");
-        //     close_conn = TRUE;
-        //     break;
-        //   }
-        // } while (TRUE);
-
-        /*******************************************************/
-        /* If the close_conn flag was turned on, we need       */
-        /* to clean up this active connection. This           */
-        /* clean up process includes removing the              */
-        /* descriptor.                                         */
-        /*******************************************************/
         close(fds[i].fd);
         fds[i].fd = -1;
         compress_array = TRUE;
@@ -636,13 +597,6 @@ int main(void)
       }  /* End of existing connection is readable             */
     } /* End of loop through pollable descriptors              */
 
-    /***********************************************************/
-    /* If the compress_array flag was turned on, we need       */
-    /* to squeeze together the array and decrement the number  */
-    /* of file descriptors. We do not need to move back the    */
-    /* events and revents fields because the events will always*/
-    /* be POLLIN in this case, and revents is output.          */
-    /***********************************************************/
     if (compress_array)
     {
       compress_array = FALSE;
@@ -668,22 +622,5 @@ int main(void)
     }
   }
 
-  /****************************old codes begins
-  // while (1)
-  // {
-  //   client_sock = accept(server_sock,
-  //     (struct sockaddr*)&client_name,
-  //     &client_name_len);
-  //   if (client_sock == -1)
-  //     error_die("cannot accept");
-
-  //   accept_request(client_sock);
-  //   printf("%s is connecting\n", inet_ntoa(client_name.sin_addr)); // from u32 to char*
-  //   //  if (pthread_create(&newthread , NULL, accept_request, client_sock) != 0)
-  //   //    perror("pthread_create");
-  // }
-
-  // close(server_sock);
-  ****************************old codes ends*/
   return(0);
 }
