@@ -33,6 +33,7 @@
   // #include <pthread.h>
 #include <sys/wait.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <sys/time.h> //FD_SET, FD_ISSET, FD_ZERO macros 
 
 
@@ -50,7 +51,7 @@ int get_line(int, char*, int);
 void headers(int, const char*);
 void not_found(int);
 void serve_file(int, const char*);
-int startup(u_short*);
+int startup(u_short* port, struct sockaddr_in *name);
 void unimplemented(int);
 
 /**********************************************************************/
@@ -134,6 +135,7 @@ void accept_request(int client)
       execute_cgi(client, path, method, query_string);
   }
 
+  // FUCK IT
   close(client);
 }
 
@@ -430,11 +432,11 @@ void serve_file(int client, const char* filename)
  * Parameters: pointer to variable containing the port to connect on
  * Returns: the socket */
  /**********************************************************************/
-int startup(u_short* port)
+int startup(u_short* port, struct sockaddr_in *name)
 {
   int httpd = 0; // socket FD
   int opt = 1;
-  struct sockaddr_in name; // defined in <netinet/in>
+  // struct sockaddr_in name; // defined in <netinet/in>
 
   httpd = socket(PF_INET, SOCK_STREAM, 0);
   if (httpd == -1)
@@ -448,20 +450,20 @@ int startup(u_short* port)
   }
 
 
-  memset(&name, 0, sizeof(name));
-  name.sin_family = AF_INET; // IPv4
-  name.sin_port = htons(*port); // htons() converts the unsigned integer hostlong from host byte order to network byte order.
+  memset(name, 0, sizeof(*name));
+  name->sin_family = AF_INET; // IPv4
+  name->sin_port = htons(*port); // htons() converts the unsigned integer hostlong from host byte order to network byte order.
   // name.sin_port = 6666;
 
-  name.sin_addr.s_addr = htonl(INADDR_ANY); // is 0.0.0.0
-  if (bind(httpd, (struct sockaddr*)&name, sizeof(name)) < 0)
+  name->sin_addr.s_addr = htonl(INADDR_ANY); // is 0.0.0.0
+  if (bind(httpd, (struct sockaddr*)name, sizeof(*name)) < 0)
     error_die("bind");
   if (*port == 0)  /* if dynamically allocating a port */
   {
-    int namelen = sizeof(name);
-    if (getsockname(httpd, (struct sockaddr*)&name, &namelen) == -1)
+    int namelen = sizeof(*name);
+    if (getsockname(httpd, (struct sockaddr*)name, (socklen_t*)&namelen) == -1)
       error_die("getsockname");
-    *port = ntohs(name.sin_port);
+    *port = ntohs(name->sin_port);
   }
   if (listen(httpd, 5) < 0)
     error_die("listen");
@@ -507,9 +509,10 @@ int main(void)
   //  pthread_t newthread;
 
   int new_socket, activity, valread, sd;
+  int max_sd;
+
   //set of socket descriptors 
   fd_set readfds;
-  int max_sd;
   const int max_clients = 20;
   int client_socket[max_clients];
   char buffer[1025];  //data buffer of 1K // ready to del
@@ -519,8 +522,8 @@ int main(void)
   {
     client_socket[i] = 0;
   }
-  
-  server_master = startup(&port);
+
+  server_master = startup(&port, &client_name);
   printf("httpd running on port %d, waiting for connections...\n", port);
 
 
@@ -548,9 +551,10 @@ int main(void)
     }
     //wait for an activity on one of the sockets , timeout is NULL , 
     //so wait indefinitely 
+    perror("Debug: ready to exec select() function");
     activity = select(max_sd + 1, &readfds, NULL, NULL, NULL);
-
-    if (activity < 0)
+    perror("Debug: select() function executed with info");
+    if (activity < 0 && (errno!=EINTR))
     {
       error_die("select error");
     }
@@ -580,18 +584,19 @@ int main(void)
 
       accept_request(new_socket);
 
-      //add new socket to array of sockets 
-      for (int i = 0; i < max_clients; i++)
-      {
-        //if position is empty 
-        if (client_socket[i] == 0)
-        {
-          client_socket[i] = new_socket;
-          printf("Adding to list of sockets as %d\n", i);
+      // DONT ADD
+      // //add new socket to array of sockets 
+      // for (int i = 0; i < max_clients; i++)
+      // {
+      //   //if position is empty 
+      //   if (client_socket[i] == 0)
+      //   {
+      //     client_socket[i] = new_socket;
+      //     printf("Adding to list of sockets as %d\n", i);
 
-          break;
-        }
-      }
+      //     break;
+      //   }
+      // }
     }
 
     //else its some IO operation on some other socket
@@ -601,6 +606,9 @@ int main(void)
 
       if (FD_ISSET(sd, &readfds))
       {
+        accept_request(sd);
+        
+        /*********OLD CODES
         //Check if it was for closing , and also read the 
         //incoming message 
         if ((valread = read(sd, buffer, 1024)) == 0)
@@ -624,6 +632,7 @@ int main(void)
           buffer[valread] = '\0';
           send(sd, buffer, strlen(buffer), 0);
         }
+        *******************/
       }
     }
 
