@@ -56,7 +56,7 @@ int get_line(int, char*, int);
 void headers(int, const char*);
 void not_found(int);
 void serve_file(int, const char*);
-int startup(u_short*);
+int startup(u_short* port, struct sockaddr_in *name);
 void unimplemented(int);
 
 /**********************************************************************/
@@ -140,6 +140,7 @@ void accept_request(int client)
       execute_cgi(client, path, method, query_string);
   }
 
+  // FUCK IT
   close(client);
 }
 
@@ -436,7 +437,7 @@ void serve_file(int client, const char* filename)
  * Parameters: pointer to variable containing the port to connect on
  * Returns: the socket */
  /**********************************************************************/
-int startup(u_short* port)
+int startup(u_short* port, struct sockaddr_in *name)
 {
   int httpd = 0; // socket FD
   struct sockaddr_in name; // defined in <netinet/in>
@@ -470,7 +471,7 @@ int startup(u_short* port)
     int namelen = sizeof(name);
     if (getsockname(httpd, (struct sockaddr*)&name, (socklen_t*)&namelen) == -1)
       error_die("getsockname");
-    *port = ntohs(name.sin_port);
+    *port = ntohs(name->sin_port);
   }
   if (listen(httpd, 5) < 0)
     error_die("listen");
@@ -506,9 +507,9 @@ void unimplemented(int client)
 
 int main(void)
 {
-  int server_sock = -1; // listen socket FD
+  int server_master = -1; // listen socket FD
   u_short port = 23333; // set port number, if == 0, dynamically allocating a port.
-  int client_sock = -1; // connection socket FD
+  // int client_sock = -1; // connection socket FD
   struct sockaddr_in client_name;
   int client_name_len = sizeof(client_name);
   //  pthread_t newthread;
