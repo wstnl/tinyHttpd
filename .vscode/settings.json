@@ -5,6 +5,8 @@
         "ostream": "c",
         "utility": "c",
         "in.h": "c",
-        "ctype.h": "c"
+        "ctype.h": "c",
+        "*.tcc": "c",
+        "fstream": "c"
     }
 }

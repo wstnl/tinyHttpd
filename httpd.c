@@ -12,13 +12,13 @@
   *  4) Uncomment the line that runs accept_request().
   *  5) Remove -lsocket from the Makefile.
   */
- 
- /*******************************************************\
-  * A frame by by J. David Blackstone.
-  * Edited and adding alias by @youzi.
-  * https://github.com/wstnl/tinyHttpd
-  * 
- \*******************************************************/
+
+  /*******************************************************\
+   * A frame by by J. David Blackstone.
+   * Edited and adding alias by @youzi.
+   * https://github.com/wstnl/tinyHttpd
+   *
+  \*******************************************************/
 
 #include <stdio.h>
 #include <sys/socket.h>
@@ -33,10 +33,18 @@
   // #include <pthread.h>
 #include <sys/wait.h>
 #include <stdlib.h>
+#include <sys/ioctl.h>
+#include <sys/poll.h>
+#include <sys/time.h>
+#include <errno.h>
+
 
 #define ISspace(x) isspace((int)(x))
 
 #define SERVER_STRING "Server: youzi_httpd/0.1.0\r\n"
+
+#define	TRUE	1
+#define	FALSE	0
 
 void accept_request(int);
 void bad_request(int);
@@ -78,7 +86,7 @@ void accept_request(int client)
   }
   method[i] = '\0';
 
-  if (strcasecmp(method, "GET") && strcasecmp(method, "POST")) 
+  if (strcasecmp(method, "GET") && strcasecmp(method, "POST"))
   { // neither "GET" nor "POST", send 501.
     unimplemented(client);
     return;
@@ -325,7 +333,7 @@ int get_line(int sock, char* buf, int size)
     {
       if (c == '\r')
       {
-        n = recv(sock, &c, 1, MSG_PEEK); 
+        n = recv(sock, &c, 1, MSG_PEEK);
         //Peeks at an incoming message. 
         //The data is treated as unread and the next recv() or similar function shall still return this data.
         /* DEBUG printf("%02X\n", c); */
@@ -410,7 +418,7 @@ void serve_file(int client, const char* filename)
     numchars = get_line(client, buf, sizeof(buf));
 
   resource = fopen(filename, "r");
-  if (resource == NULL) 
+  if (resource == NULL)
     not_found(client); // resource not found (404)
   else
   {
@@ -432,22 +440,35 @@ int startup(u_short* port)
 {
   int httpd = 0; // socket FD
   struct sockaddr_in name; // defined in <netinet/in>
+  int on = 1;
 
   httpd = socket(PF_INET, SOCK_STREAM, 0);
   if (httpd == -1)
     error_die("socket");
+
+  // Allow socket descriptor to be reuseable 
+  if (setsockopt(httpd, SOL_SOCKET, SO_REUSEADDR, (char*)&on, sizeof(on)) < 0)
+    error_die("setsockopt");
+
+  /*************************************************************/
+  /* Set socket to be nonblocking. All of the sockets for      */
+  /* the incoming connections will also be nonblocking since   */
+  /* they will inherit that state from the listening socket.   */
+  /*************************************************************/
+  if (ioctl(httpd, FIONBIO, (char*)&on) < 0)
+    error_die("itocl");
+
   memset(&name, 0, sizeof(name));
   name.sin_family = AF_INET; // IPv4
   name.sin_port = htons(*port); // htons() converts the unsigned integer hostlong from host byte order to network byte order.
-  // name.sin_port = 6666;
-
   name.sin_addr.s_addr = htonl(INADDR_ANY); // is 0.0.0.0
+
   if (bind(httpd, (struct sockaddr*)&name, sizeof(name)) < 0)
     error_die("bind");
   if (*port == 0)  /* if dynamically allocating a port */
   {
     int namelen = sizeof(name);
-    if (getsockname(httpd, (struct sockaddr*)&name, &namelen) == -1)
+    if (getsockname(httpd, (struct sockaddr*)&name, (socklen_t*)&namelen) == -1)
       error_die("getsockname");
     *port = ntohs(name.sin_port);
   }
@@ -483,8 +504,6 @@ void unimplemented(int client)
   send(client, buf, strlen(buf), 0);
 }
 
-/**********************************************************************/
-
 int main(void)
 {
   int server_sock = -1; // listen socket FD
@@ -494,24 +513,177 @@ int main(void)
   int client_name_len = sizeof(client_name);
   //  pthread_t newthread;
 
+  struct pollfd	fds[200];
+  int	nfds = 1, current_size = 0, i, j;
+  int timeout;
+  int close_conn;
+  int	len, rc, on = 1;
+  int	new_sd = -1;
+  int	desc_ready, end_server = FALSE, compress_array = FALSE;
+
+
+
   server_sock = startup(&port);
   printf("httpd running on port %d\n", port);
 
-  while (1)
-  {
-    client_sock = accept(server_sock,
-      (struct sockaddr*)&client_name,
-      &client_name_len);
-    if (client_sock == -1)
-      error_die("cannot accept");
+  memset(fds, 0, sizeof(fds));
 
-    accept_request(client_sock);
-    printf("%s is connecting\n", inet_ntoa(client_name.sin_addr)); // from u32 to char*
-    //  if (pthread_create(&newthread , NULL, accept_request, client_sock) != 0)
-    //    perror("pthread_create");
+  /*************************************************************/
+  /* Set up the initial listening socket                        */
+  /*************************************************************/
+  fds[0].fd = server_sock;
+  fds[0].events = POLLIN;
+
+  timeout = (3 * 60 * 1000);
+
+  do
+  {
+    printf("Waiting on poll()...\n");
+    rc = poll(fds, nfds, timeout);
+
+    if (rc < 0)
+    {
+      perror("  poll() failed");
+      break;
+    }
+
+    if (rc == 0)
+    {
+      printf("  poll() timed out.  End program.\n");
+      break;
+    }
+
+    current_size = nfds;
+    for (i = 0; i < current_size; i++)
+    {
+      if (fds[i].revents == 0)
+        continue;
+
+      if (fds[i].revents != POLLIN)
+      {
+        printf("  Error! revents = %d\n", fds[i].revents);
+        end_server = TRUE;
+        break;
+      }
+
+      if (fds[i].fd == server_sock)
+      {
+        printf("  Listening socket is readable\n");
+        do
+        {
+          new_sd = accept(server_sock, NULL, NULL);
+          if (new_sd < 0)
+          {
+            if (errno != EWOULDBLOCK)
+            {
+              perror("  accept() failed");
+              end_server = TRUE;
+            }
+            break;
+          }
+          printf("  New incoming connection - %d\n", new_sd);
+          fds[nfds].fd = new_sd;
+          fds[nfds].events = POLLIN;
+          nfds++;
+        } while (new_sd != -1);
+      }
+      else
+      {
+        printf("  Descriptor %d is readable\n", fds[i].fd);
+        close_conn = FALSE;
+        accept_request(fds[i].fd);
+        // do
+        // {
+        //   if (recv(fds[i].fd, buffer, sizeof(buffer), 0) < 0)
+        //   {
+        //     if (errno != EWOULDBLOCK)
+        //     {
+        //       perror("  recv() failed");
+        //       close_conn = TRUE;
+        //     }
+        //     break;
+        //   }
+
+        //   if (rc == 0)
+        //   {
+        //     printf("  Connection closed\n");
+        //     close_conn = TRUE;
+        //     break;
+        //   }
+
+        //   len = rc;
+        //   printf("  %d bytes received\n", len);
+
+        //   rc = send(fds[i].fd, buffer, len, 0);
+        //   if (rc < 0)
+        //   {
+        //     perror("  send() failed");
+        //     close_conn = TRUE;
+        //     break;
+        //   }
+        // } while (TRUE);
+
+        /*******************************************************/
+        /* If the close_conn flag was turned on, we need       */
+        /* to clean up this active connection. This           */
+        /* clean up process includes removing the              */
+        /* descriptor.                                         */
+        /*******************************************************/
+        close(fds[i].fd);
+        fds[i].fd = -1;
+        compress_array = TRUE;
+
+      }  /* End of existing connection is readable             */
+    } /* End of loop through pollable descriptors              */
+
+    /***********************************************************/
+    /* If the compress_array flag was turned on, we need       */
+    /* to squeeze together the array and decrement the number  */
+    /* of file descriptors. We do not need to move back the    */
+    /* events and revents fields because the events will always*/
+    /* be POLLIN in this case, and revents is output.          */
+    /***********************************************************/
+    if (compress_array)
+    {
+      compress_array = FALSE;
+      for (i = 0; i < nfds; i++)
+      {
+        if (fds[i].fd == -1)
+        {
+          for (j = i; j < nfds; j++)
+          {
+            fds[j].fd = fds[j + 1].fd;
+          }
+          nfds--;
+        }
+      }
+    }
+  } while (end_server == FALSE); /* End of serving running.    */
+
+  for (i = 0; i < nfds; i++)
+  {
+    if (fds[i].fd >= 0)
+    {
+      close(fds[i].fd);
+    }
   }
 
-  close(server_sock);
+  /****************************old codes begins
+  // while (1)
+  // {
+  //   client_sock = accept(server_sock,
+  //     (struct sockaddr*)&client_name,
+  //     &client_name_len);
+  //   if (client_sock == -1)
+  //     error_die("cannot accept");
 
+  //   accept_request(client_sock);
+  //   printf("%s is connecting\n", inet_ntoa(client_name.sin_addr)); // from u32 to char*
+  //   //  if (pthread_create(&newthread , NULL, accept_request, client_sock) != 0)
+  //   //    perror("pthread_create");
+  // }
+
+  // close(server_sock);
+  ****************************old codes ends*/
   return(0);
 }
