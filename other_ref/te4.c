@@ -1,3 +1,6 @@
+/***********************************************
+ * ref: https://blog.csdn.net/duyiwuer2009/article/details/8093427 
+ ***********************************************/
 #include	<stdio.h>
 #include	<stdlib.h>
 #include	<sys/ioctl.h>

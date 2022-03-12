@@ -3,11 +3,16 @@
 <BODY>
 <P>Welcome to @youzi's webserver.
 <H1>CGI demo
-<FORM ACTION="myTry.cgi" METHOD="POST">
+<FORM ACTION="color.cgi" METHOD="POST">
 Enter a color: <INPUT TYPE="text" NAME="color">
 <!-- Enter a color2: <INPUT TYPE="text" NAME="color2">
 Enter a color3: <INPUT TYPE="text" NAME="color3"> -->
-<INPUT TYPE="submit">
+<INPUT TYPE="submit" TITLE="Submit using perl script">
+</FORM>
+<P></P>
+<FORM ACTION="myTry.cgi" METHOD="POST">
+    Enter your test words: <INPUT TYPE="text" NAME="value">
+    <INPUT TYPE="submit" TITLE="Submit using python script">
 </FORM>
 <!-- <form action="check.cgi" method="POST"><button></button></form> -->
 </BODY>

@@ -14,7 +14,7 @@
   */
 
   /*******************************************************\
-   * A frame by by J. David Blackstone.
+   * A frame by J. David Blackstone.
    * Edited and adding alias by @youzi.
    * https://github.com/wstnl/tinyHttpd
    *
@@ -42,6 +42,7 @@
 #define ISspace(x) isspace((int)(x))
 
 #define SERVER_STRING "Server: youzi_httpd/0.1.0\r\n"
+#define SERVER_PORT 23333
 
 #define	TRUE	1
 #define	FALSE	0
@@ -56,7 +57,8 @@ int get_line(int, char*, int);
 void headers(int, const char*);
 void not_found(int);
 void serve_file(int, const char*);
-int startup(u_short*);
+int startup(u_short*, struct sockaddr_in*)
+;
 void unimplemented(int);
 
 /**********************************************************************/
@@ -140,7 +142,7 @@ void accept_request(int client)
       execute_cgi(client, path, method, query_string);
   }
 
-  close(client);
+  // close(client);
 }
 
 /**********************************************************************/
@@ -434,13 +436,18 @@ void serve_file(int client, const char* filename)
  * port and modify the original port variable to reflect the actual
  * port.
  * Parameters: pointer to variable containing the port to connect on
- * Returns: the socket */
+ * Returns: the socket 
+ * ps: The origin version didn't have the second parameter, actually 
+ * it's not a big deal. 
+ * :)                                                                  */
  /**********************************************************************/
-int startup(u_short* port)
+int startup(u_short* port, struct sockaddr_in* name)
 {
   int httpd = 0; // socket FD
-  struct sockaddr_in name; // defined in <netinet/in>
+  // struct sockaddr_in name; // defined in <netinet/in>
   int on = 1;
+  int namelen = sizeof(*name);
+
 
   httpd = socket(PF_INET, SOCK_STREAM, 0);
   if (httpd == -1)
@@ -458,19 +465,18 @@ int startup(u_short* port)
   if (ioctl(httpd, FIONBIO, (char*)&on) < 0)
     error_die("itocl");
 
-  memset(&name, 0, sizeof(name));
-  name.sin_family = AF_INET; // IPv4
-  name.sin_port = htons(*port); // htons() converts the unsigned integer hostlong from host byte order to network byte order.
-  name.sin_addr.s_addr = htonl(INADDR_ANY); // is 0.0.0.0
+  memset(name, 0, namelen);
+  name->sin_family = AF_INET; // IPv4
+  name->sin_port = htons(*port); // htons() converts the unsigned integer hostlong from host byte order to network byte order.
+  name->sin_addr.s_addr = htonl(INADDR_ANY); // is 0.0.0.0
 
-  if (bind(httpd, (struct sockaddr*)&name, sizeof(name)) < 0)
+  if (bind(httpd, (struct sockaddr*)name, namelen) < 0)
     error_die("bind");
   if (*port == 0)  /* if dynamically allocating a port */
   {
-    int namelen = sizeof(name);
-    if (getsockname(httpd, (struct sockaddr*)&name, (socklen_t*)&namelen) == -1)
+    if (getsockname(httpd, (struct sockaddr*)name, (socklen_t*)&namelen) == -1)
       error_die("getsockname");
-    *port = ntohs(name.sin_port);
+    *port = ntohs(name->sin_port);
   }
   if (listen(httpd, 5) < 0)
     error_die("listen");
@@ -507,28 +513,21 @@ void unimplemented(int client)
 int main(void)
 {
   int server_sock = -1; // listen socket FD
-  u_short port = 23333; // set port number, if == 0, dynamically allocating a port.
-  // int client_sock = -1; // connection socket FD
-  struct sockaddr_in client_name;
-  // int client_name_len = sizeof(client_name);
-  //  pthread_t newthread;
+  u_short port = SERVER_PORT; // set port number, if == 0, dynamically allocating a port.
+  struct sockaddr_in server_name;
 
   struct pollfd	fds[200];
   int	nfds = 1, current_size = 0, i, j, rc;
-  int timeout= (3 * 60 * 1000);
+  int timeout = (3 * 60 * 1000);
   int	new_sd = -1;
   int	end_server = FALSE, compress_array = FALSE;
 
-
-
-  server_sock = startup(&port);
+  server_sock = startup(&port, &server_name); 
   printf("httpd running on port %d\n", port);
 
   memset(fds, 0, sizeof(fds));
 
-  /*************************************************************/
-  /* Set up the initial listening socket                        */
-  /*************************************************************/
+  // Set up the initial listening socket 
   fds[0].fd = server_sock;
   fds[0].events = POLLIN;
 
@@ -542,7 +541,6 @@ int main(void)
       perror("  poll() failed");
       break;
     }
-
     if (rc == 0)
     {
       printf("  poll() timed out.  End program.\n");
@@ -588,17 +586,17 @@ int main(void)
         printf("  Descriptor %d is readable\n", fds[i].fd);
         // close_conn = FALSE;
         accept_request(fds[i].fd);
-        printf("%s is connecting\n", inet_ntoa(client_name.sin_addr)); // from u32 to char*
+        // printf("%s is connecting\n", inet_ntoa(server_name.sin_addr)); // from u32 to char*
 
         close(fds[i].fd);
         fds[i].fd = -1;
         compress_array = TRUE;
 
-      }  /* End of existing connection is readable             */
-    } /* End of loop through pollable descriptors              */
+      }  /* End of existing connection is readable  */
+    } /* End of loop through pollable descriptors  */
 
     if (compress_array)
-    {
+    { // when a client_FD removed, compress array.
       compress_array = FALSE;
       for (i = 0; i < nfds; i++)
       {
@@ -622,5 +620,5 @@ int main(void)
     }
   }
 
-  return(0);
+  return 0;
 }

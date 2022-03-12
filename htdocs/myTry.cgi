@@ -4,6 +4,8 @@ import sys,os
 # import cgi
 # import cgitb
 
+# cgitb.enable()
+
 # cgi.test()
 length = os.getenv('CONTENT_LENGTH')
 # form = cgi.FieldStorage()
@@ -12,6 +14,7 @@ print("<html>")
 if length :
     userdata = sys.stdin.read(int(length))
     print("<p>Your input is:" + userdata)
+
     # color = form.getvalue("color")
     # print("<p>We see your color is " + color)
 
