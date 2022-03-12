@@ -371,6 +371,8 @@ void headers(int client, const char* filename)
   send(client, buf, strlen(buf), 0);
   sprintf(buf, "Content-Type: text/html\r\n");
   send(client, buf, strlen(buf), 0);
+  sprintf(buf, "Connection: close\r\n");
+  send(client, buf, strlen(buf), 0);
   strcpy(buf, "\r\n");
   send(client, buf, strlen(buf), 0);
 }
@@ -588,7 +590,11 @@ int main(void)
         accept_request(fds[i].fd);
         // printf("%s is connecting\n", inet_ntoa(server_name.sin_addr)); // from u32 to char*
 
-        close(fds[i].fd);
+        close(fds[i].fd); 
+        /* when a web page successfully send, we close the connection between 
+         * the server and client.
+         */
+        printf("  Descriptor %d is closed\n", fds[i].fd);
         fds[i].fd = -1;
         compress_array = TRUE;
 
